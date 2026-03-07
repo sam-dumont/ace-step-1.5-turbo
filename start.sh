@@ -4,8 +4,8 @@
 echo "Starting ACE-Step services..."
 
 # Model paths (pre-baked in Docker image)
-CONFIG_PATH="${ACESTEP_CONFIG_PATH:-/app/checkpoints/acestep-v15-base}"
-LM_MODEL_PATH="${ACESTEP_LM_MODEL_PATH:-/app/checkpoints/acestep-5Hz-lm-1.7B}"
+CONFIG_PATH="${ACESTEP_CONFIG_PATH:-/app/checkpoints/acestep-v15-turbo}"
+LM_MODEL_PATH="${ACESTEP_LM_MODEL_PATH:-/app/checkpoints/acestep-5Hz-lm-0.6B}"
 
 echo "Using DiT model: $CONFIG_PATH"
 echo "Using LM model: $LM_MODEL_PATH"

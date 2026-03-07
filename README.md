@@ -1,24 +1,41 @@
-# ACE-Step 1.5 Docker Image
+# ACE-Step 1.5 Docker Image (Turbo + 0.6B LM)
 
-A Docker image for running ACE-Step 1.5's built-in API server with models pre-baked.
+Fork of [ValyrianTech/ace-step-1.5](https://github.com/ValyrianTech/ace-step-1.5) optimized for GPUs with 8GB VRAM.
 
-[![ValyrianTech](https://img.shields.io/badge/ValyrianTech-Links-blue)](https://linktr.ee/ValyrianTech) [![Patreon](https://img.shields.io/badge/Patreon-Support-orange)](http://patreon.com/ValyrianTech)
+The upstream image ships the **base** DiT model (50 diffusion steps) and the **1.7B** language model. That's fine if you have 32GB+ VRAM, but on an 8GB card like a T1000 or GTX 1070, you'll either OOM or wait forever.
 
-## Deploy on RunPod
+This fork swaps in:
 
-The fastest way to get started is to deploy the pre-built image on RunPod:
+- **Turbo DiT model** (`acestep-v15-turbo`): 8 diffusion steps instead of 50, roughly 6x faster with minimal quality loss
+- **0.6B LM** (`acestep-5Hz-lm-0.6B`): saves ~2.2GB VRAM compared to the 1.7B, still provides semantic planning ("thinking mode")
 
-[![Deploy on RunPod](https://img.shields.io/badge/RunPod-Deploy-blueviolet?logo=runpod)](https://console.runpod.io/deploy?template=uuc79b5j3c&ref=2vdt3dn9)
+The base model and 1.7B LM are excluded from the image entirely to keep it smaller.
 
-This template includes all models pre-loaded and is ready to use immediately. Once deployed:
-- **REST API**: `https://<POD_ID>-8000.proxy.runpod.net`
+## What changed from upstream
 
-## Features
+3 files, all straightforward:
 
-- **ACE-Step's built-in API server** with full feature set
-- **Multi-stage Docker build** with models baked in (~15GB image)
-- **GPU support** via NVIDIA CUDA 12.8 runtime
-- **LLM-powered features**: lyrics/caption formatting
+**Dockerfile:**
+- Main model download now excludes `acestep-v15-base/*` and `acestep-5Hz-lm-1.7B/*` (upstream excludes turbo instead)
+- Downloads `ACE-Step/acestep-5Hz-lm-0.6B` separately
+- `ACESTEP_CONFIG_PATH` points to turbo, `ACESTEP_LM_MODEL_PATH` points to 0.6B
+- Placeholder directory flipped from turbo to base (the startup check wants both dirs to exist)
+
+**start.sh:**
+- Defaults updated to match: turbo DiT + 0.6B LM
+
+That's it. Everything else (API server, Gradio UI, endpoints) is identical to upstream.
+
+## Hardware notes
+
+Tested on an NVIDIA T1000 8GB (Turing, SM 75). Key constraints for this class of GPU:
+
+- No bf16 support (Ampere+ only), runs in FP16
+- No Flash Attention (SM 80+ only), must use `pt` backend instead of `vllm`
+- INT8 quantization and CPU offloading auto-enabled by ACE-Step's tier detection
+- ACE-Step caps generation at ~60 seconds with LM enabled at this VRAM tier
+
+For even less VRAM usage, you can disable the LM entirely with `ACESTEP_INIT_LLM=false` (cuts VRAM to under 5GB, 30-50% faster, but loses the lyrics enhancement feature).
 
 ## Quick Start
 
@@ -28,27 +45,21 @@ This template includes all models pre-loaded and is ready to use immediately. On
 - NVIDIA GPU with CUDA support
 - HuggingFace token (for downloading gated models during build)
 
-### 1. Build the Docker Image
+### Build
 
 ```bash
-# Using the build script
-python build_docker.py acestep-api --hf-token YOUR_HF_TOKEN --latest
-
-# Or manually
 docker build --build-arg HF_TOKEN=YOUR_HF_TOKEN -t acestep-api:latest .
 ```
 
-### 2. Run with Docker Compose
+### Run
 
 ```bash
 docker compose up -d
 ```
 
-The API will be available at `http://localhost:8000`.
+API available at `http://localhost:8000`.
 
-## CLI Tool (Recommended)
-
-The easiest way to generate music is using the included Python CLI script:
+## CLI Tool
 
 ```bash
 python generate_music.py \
@@ -59,13 +70,11 @@ python generate_music.py \
   --output my_song.mp3
 ```
 
-The CLI handles task submission, polling, and file download automatically. See `python generate_music.py --help` for all options, or check the [API Usage Guide](docs/API_USAGE.md) for detailed examples.
+Handles task submission, polling, and file download automatically. See `python generate_music.py --help` for all options.
 
 ## API Endpoints
 
 See the [ACE-Step API documentation](https://github.com/ace-step/ACE-Step-1.5/blob/main/docs/en/API.md) for full details.
-
-### Core Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -80,13 +89,14 @@ See the [ACE-Step API documentation](https://github.com/ace-step/ACE-Step-1.5/bl
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ACESTEP_CONFIG_PATH` | `/app/checkpoints/acestep-v15-base` | Full path to DiT model |
-| `ACESTEP_LM_MODEL_PATH` | `/app/checkpoints/acestep-5Hz-lm-1.7B` | Full path to LM model |
+| `ACESTEP_CONFIG_PATH` | `/app/checkpoints/acestep-v15-turbo` | Path to DiT model |
+| `ACESTEP_LM_MODEL_PATH` | `/app/checkpoints/acestep-5Hz-lm-0.6B` | Path to LM model |
 | `ACESTEP_OUTPUT_DIR` | `/app/outputs` | Generated audio output directory |
 | `ACESTEP_DEVICE` | `cuda` | Device (cuda, cpu, mps) |
 | `ACESTEP_LM_BACKEND` | `pt` | LLM backend (vllm, pt) |
 | `ACESTEP_API_HOST` | `0.0.0.0` | Server host |
 | `ACESTEP_API_PORT` | `8000` | Server port |
+| `ACESTEP_INIT_LLM` | `true` | Set to `false` to disable LM entirely |
 
 ## License
 
