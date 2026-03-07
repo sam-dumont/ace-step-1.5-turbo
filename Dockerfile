@@ -2,17 +2,13 @@
 # ACE-Step 1.5 FastAPI Server - Multi-stage Dockerfile
 # =============================================================================
 # This image includes the ACE-Step models (~15GB total)
-# Build with: docker build --build-arg HF_TOKEN=your_token -t acestep-api:latest .
+# Build with: docker build --secret id=HF_TOKEN,env=HF_TOKEN -t acestep-api:latest .
 # =============================================================================
 
 # -----------------------------------------------------------------------------
 # Stage 1: Model Downloader - Download models from HuggingFace
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim as model-downloader
-
-# Accept HuggingFace token as build argument (required for gated models)
-ARG HF_TOKEN
-ENV HF_TOKEN=${HF_TOKEN}
+FROM python:3.11-slim AS model-downloader
 
 WORKDIR /models
 
@@ -25,15 +21,17 @@ ENV HF_HUB_ENABLE_HF_TRANSFER=1
 # Download main model package (includes VAE, Qwen3-Embedding, acestep-5Hz-lm-1.7B, acestep-v15-turbo)
 # Exclude base model — turbo is faster (8 vs 50 diffusion steps) and better suited for low-VRAM GPUs
 # Exclude 1.7B LM — we use 0.6B instead to save ~2.2GB VRAM
-RUN python -c "import os; from huggingface_hub import snapshot_download; snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/models/checkpoints', token=os.environ.get('HF_TOKEN'), ignore_patterns=['acestep-v15-base/*', 'acestep-5Hz-lm-1.7B/*'])"
+RUN --mount=type=secret,id=HF_TOKEN \
+    python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/models/checkpoints', token=token, ignore_patterns=['acestep-v15-base/*', 'acestep-5Hz-lm-1.7B/*'])"
 
 # Download 0.6B LM — fits comfortably in 8GB VRAM alongside the DiT and VAE
-RUN python -c "import os; from huggingface_hub import snapshot_download; snapshot_download('ACE-Step/acestep-5Hz-lm-0.6B', local_dir='/models/checkpoints/acestep-5Hz-lm-0.6B', token=os.environ.get('HF_TOKEN'))"
+RUN --mount=type=secret,id=HF_TOKEN \
+    python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/acestep-5Hz-lm-0.6B', local_dir='/models/checkpoints/acestep-5Hz-lm-0.6B', token=token)"
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Install ACE-Step and run from /app
 # -----------------------------------------------------------------------------
-FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04 as runtime
+FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04 AS runtime
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
