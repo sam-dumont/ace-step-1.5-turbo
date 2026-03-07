@@ -84,15 +84,26 @@ COPY --from=model-downloader /models/checkpoints /app/checkpoints
 # We use turbo instead, but the startup check looks for all MAIN_MODEL_COMPONENTS
 RUN mkdir -p /app/checkpoints/acestep-v15-base
 
+# Create non-root user (UID 1001) and fix ownership
+RUN groupadd -g 1001 appuser && \
+    useradd -u 1001 -g 1001 -m -s /bin/bash appuser
+
 # Copy startup script
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
-# Create output directory
-RUN mkdir -p /app/outputs
+# Create writable directories and fix ownership
+RUN mkdir -p /app/outputs /home/appuser/.cache && \
+    chown -R 1001:1001 /app/outputs /home/appuser/.cache
+
+# PyTorch cache dir: getpass.getuser() needs the user in /etc/passwd (done above),
+# and the cache dir must be writable by UID 1001
+ENV TORCHINDUCTOR_CACHE_DIR=/home/appuser/.cache/torch_inductor
 
 # Expose ports (8000 for API, 7860 for Gradio UI)
 EXPOSE 8000 7860
+
+USER 1001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
