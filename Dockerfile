@@ -93,8 +93,11 @@ COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # Create writable directories and fix ownership
-RUN mkdir -p /app/outputs /home/appuser/.cache && \
-    chown -R 1001:1001 /app/outputs /home/appuser/.cache
+# gradio_outputs: ACE-Step's generation_info.py creates this inside site-packages at import time
+RUN mkdir -p /app/outputs /home/appuser/.cache \
+    /usr/local/lib/python3.11/dist-packages/gradio_outputs && \
+    chown -R 1001:1001 /app/outputs /home/appuser/.cache \
+    /usr/local/lib/python3.11/dist-packages/gradio_outputs
 
 # PyTorch cache dir: getpass.getuser() needs the user in /etc/passwd (done above),
 # and the cache dir must be writable by UID 1001
