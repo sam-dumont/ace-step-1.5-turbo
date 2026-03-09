@@ -45,19 +45,73 @@ For even less VRAM usage, you can disable the LM entirely with `ACESTEP_INIT_LLM
 - NVIDIA GPU with CUDA support
 - HuggingFace token (for downloading gated models during build)
 
-### Build
+### Using the pre-built image
 
-```bash
-docker build --build-arg HF_TOKEN=YOUR_HF_TOKEN -t acestep-api:latest .
-```
-
-### Run
+The fastest way. No build needed:
 
 ```bash
 docker compose up -d
 ```
 
-API available at `http://localhost:8000`.
+API available at `http://localhost:8000`. Test it:
+
+```bash
+curl http://localhost:8000/health
+```
+
+### Building from source
+
+If you want to customize the image:
+
+```bash
+docker build --secret id=HF_TOKEN,env=HF_TOKEN -t acestep-api:latest .
+```
+
+## Deployment
+
+### Docker Compose
+
+The included [`docker-compose.yml`](docker-compose.yml) runs the API server with GPU support. Edit environment variables as needed, then:
+
+```bash
+docker compose up -d
+```
+
+### Kubernetes
+
+Kustomize manifests in [`deploy/kubernetes/`](deploy/kubernetes/). Review and adjust to your cluster (storage class, ingress domain, API key), then:
+
+```bash
+kubectl apply -k deploy/kubernetes/
+```
+
+The deployment runs `acestep-api` only (no Gradio UI) to keep VRAM usage down. Both the API server and the Gradio UI load the full model stack independently, so running both on an 8GB card will OOM.
+
+Key things to customize:
+- `secret.yaml`: your API key
+- `pvc.yaml`: storage class for your cluster
+- `ingress.yaml`: your domain (uncomment in `kustomization.yaml` to enable)
+- `deployment.yaml`: resource limits, node selector, `MAX_CUDA_VRAM` if you're on 8GB VRAM
+
+### Terraform
+
+Full Terraform config in [`deploy/terraform/`](deploy/terraform/). Deploys the namespace, secret, PVC, deployment, service, and optionally an ingress:
+
+```hcl
+# Minimal
+terraform init && terraform apply
+
+# With ingress
+terraform apply -var='domain=acestep.example.com' -var='tls_issuer=letsencrypt-prod'
+```
+
+Copy `terraform.tfvars.example` to `terraform.tfvars` to configure storage class, GPU settings, node selectors, etc.
+
+Get your API key after deploy:
+
+```bash
+terraform output -raw api_key
+```
 
 ## CLI Tool
 
@@ -84,6 +138,43 @@ See the [ACE-Step API documentation](https://github.com/ace-step/ACE-Step-1.5/bl
 | `/query_result` | POST | Batch query task results |
 | `/format_input` | POST | Format and enhance lyrics/caption via LLM |
 | `/v1/audio` | GET | Download audio file |
+
+### Usage with curl
+
+Generate a 60-second track:
+
+```bash
+API=http://localhost:8000
+
+# Submit a generation task
+TASK=$(curl -s -X POST "$API/release_task" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "caption": "Upbeat indie pop with jangly guitars and energetic vocals",
+    "lyrics": "[Verse 1]\nWalking down the street\nMusic in my feet\n\n[Chorus]\nWe are alive tonight",
+    "duration": 60,
+    "num_songs": 1
+  }')
+
+echo "$TASK"
+TASK_ID=$(echo "$TASK" | python -c "import sys,json; print(json.load(sys.stdin)['task_id'])")
+
+# Poll until done (check every 10s)
+while true; do
+  RESULT=$(curl -s -X POST "$API/query_result" \
+    -H "Content-Type: application/json" \
+    -d "{\"task_ids\": [\"$TASK_ID\"]}")
+  echo "$RESULT" | python -m json.tool
+  STATUS=$(echo "$RESULT" | python -c "import sys,json; print(json.load(sys.stdin)['results'][0]['status'])")
+  [ "$STATUS" = "completed" ] && break
+  [ "$STATUS" = "failed" ] && echo "Generation failed" && break
+  sleep 10
+done
+
+# Download the audio
+AUDIO_PATH=$(echo "$RESULT" | python -c "import sys,json; print(json.load(sys.stdin)['results'][0]['audio_paths'][0])")
+curl -o output.wav "$API/v1/audio?path=$AUDIO_PATH"
+```
 
 ## Environment Variables
 

@@ -1,26 +1,22 @@
-version: "3.8"
-
 services:
   acestep-api:
     build:
       context: .
       dockerfile: Dockerfile
-    image: acestep-api:latest
+    image: ghcr.io/sam-dumont/ace-step-1.5-turbo:latest
     container_name: acestep-api
     ports:
       - "8000:8000"
     volumes:
-      # Mount outputs directory for generated audio (models are baked into image)
-      - ./outputs:/app/outputs
+      - outputs:/app/outputs
     environment:
-      - ACESTEP_PROJECT_ROOT=/app
-      - ACESTEP_OUTPUT_DIR=/app/outputs
       - ACESTEP_DEVICE=cuda
-      - ACESTEP_CONFIG_PATH=/app/checkpoints/acestep-v15-base
-      - ACESTEP_LM_MODEL_PATH=/app/checkpoints/acestep-5Hz-lm-1.7B
       - ACESTEP_LM_BACKEND=pt
       - ACESTEP_API_HOST=0.0.0.0
       - ACESTEP_API_PORT=8000
+      - ACESTEP_OUTPUT_DIR=/app/outputs
+      # Uncomment for 8GB VRAM GPUs (T1000, GTX 1070, etc.)
+      # - MAX_CUDA_VRAM=20
     deploy:
       resources:
         reservations:
@@ -34,4 +30,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
+      start_period: 300s
+
+volumes:
+  outputs:

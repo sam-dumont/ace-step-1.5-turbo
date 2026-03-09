@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acestep
+  namespace: acestep
+  labels:
+    app: acestep
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: acestep
+  template:
+    metadata:
+      labels:
+        app: acestep
+    spec:
+      # Uncomment if using a private registry
+      # imagePullSecrets:
+      #   - name: ghcr-credentials
+
+      # Use the nvidia RuntimeClass if your cluster has the GPU operator installed.
+      # Remove if you use the NVIDIA device plugin without a RuntimeClass.
+      runtimeClassName: nvidia
+
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+
+      # Target GPU nodes — adjust labels to match your cluster
+      # nodeSelector:
+      #   nvidia.com/gpu.present: "true"
+
+      containers:
+        - name: acestep
+          image: ghcr.io/sam-dumont/ace-step-1.5-turbo:latest
+          imagePullPolicy: Always
+
+          # Run API-only (no Gradio UI). Default CMD runs both.
+          command: ["acestep-api"]
+
+          ports:
+            - containerPort: 8000
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 10Gi
+            limits:
+              cpu: "4"
+              memory: 20Gi
+              nvidia.com/gpu: 1
+
+          env:
+            - name: ACESTEP_DEVICE
+              value: cuda
+            - name: ACESTEP_LM_BACKEND
+              value: pt
+            - name: ACESTEP_API_HOST
+              value: "0.0.0.0"
+            - name: ACESTEP_API_PORT
+              value: "8000"
+            - name: ACESTEP_OUTPUT_DIR
+              value: /data/output
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: all
+
+            # API key authentication (optional — remove if you don't need auth)
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: acestep-api-key
+                  key: api-key
+
+            # Uncomment for 8GB VRAM GPUs to fake higher tier and disable INT8 quantization
+            # - name: MAX_CUDA_VRAM
+            #   value: "20"
+
+          volumeMounts:
+            - name: output
+              mountPath: /data
+
+          # Startup probe: model loading is slow (~2-10 min depending on GPU).
+          # Until this passes, liveness/readiness probes are disabled.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 10
+            failureThreshold: 60
+            timeoutSeconds: 5
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 5
+
+      volumes:
+        - name: output
+          persistentVolumeClaim:
+            claimName: acestep-output

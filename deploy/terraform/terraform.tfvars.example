@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars and adjust for your cluster
+
+namespace     = "acestep"
+image         = "ghcr.io/sam-dumont/ace-step-1.5-turbo:latest"
+gpu_enabled   = true
+storage_class = ""      # empty = cluster default
+storage_size  = "20Gi"
+
+# Ingress (set domain to enable)
+# domain        = "acestep.example.com"
+# ingress_class = "nginx"
+# tls_issuer    = "letsencrypt-prod"
+
+# GPU node targeting
+# node_selector = {
+#   "nvidia.com/gpu.present" = "true"
+# }
+
+# Set to null if your cluster doesn't use a GPU RuntimeClass
+# runtime_class = "nvidia"

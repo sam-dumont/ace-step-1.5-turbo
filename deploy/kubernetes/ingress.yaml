@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: acestep
+  namespace: acestep
+  annotations:
+    # Uncomment and adjust for your cert-manager setup
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  # Change to your ingress class (traefik, nginx, etc.)
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - acestep.example.com
+      secretName: acestep-tls
+  rules:
+    - host: acestep.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: acestep
+                port:
+                  number: 8000
