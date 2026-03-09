@@ -19,12 +19,12 @@ RUN pip install --no-cache-dir "huggingface-hub[cli,hf_transfer]"
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 # Download main model package (shared components: VAE, Qwen3-Embedding, text encoder)
-# The main package includes directory stubs for all variants but NOT the actual DiT weights.
-# DiT weights and LM models must be downloaded separately from their own HF repos.
+# Exclude base DiT weights and 1.7B LM to keep image small (~13GB instead of ~20GB).
+# The couronne node has limited ephemeral storage, so every GB matters.
 RUN --mount=type=secret,id=HF_TOKEN \
-    python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/models/checkpoints', token=token)"
+    python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/models/checkpoints', token=token, ignore_patterns=['acestep-v15-base/*', 'acestep-5Hz-lm-1.7B/*'])"
 
-# Download turbo DiT model weights (8 diffusion steps, ~6x faster than base)
+# Download turbo DiT model weights separately (8 diffusion steps, ~6x faster than base)
 RUN --mount=type=secret,id=HF_TOKEN \
     python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/acestep-v15-turbo', local_dir='/models/checkpoints/acestep-v15-turbo', token=token)"
 
@@ -83,6 +83,9 @@ RUN ln -s /app/checkpoints /usr/local/lib/python3.11/dist-packages/checkpoints
 
 # Copy models from model-downloader stage into /app/checkpoints
 COPY --from=model-downloader /models/checkpoints /app/checkpoints
+
+# Create placeholder dirs for excluded models to satisfy check_main_model_exists()
+RUN mkdir -p /app/checkpoints/acestep-v15-base /app/checkpoints/acestep-5Hz-lm-1.7B
 
 # Create non-root user (UID 1001) and fix ownership
 RUN groupadd -g 1001 appuser && \
