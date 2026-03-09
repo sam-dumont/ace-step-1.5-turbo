@@ -18,11 +18,15 @@ RUN pip install --no-cache-dir "huggingface-hub[cli,hf_transfer]"
 # Enable fast transfers
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
-# Download main model package (includes VAE, Qwen3-Embedding, acestep-5Hz-lm-1.7B, acestep-v15-turbo)
-# Exclude base model — turbo is faster (8 vs 50 diffusion steps) and better suited for low-VRAM GPUs
-# Exclude 1.7B LM — we use 0.6B instead to save ~2.2GB VRAM
+# Download main model package (shared components: VAE, Qwen3-Embedding, text encoder)
+# The main package includes directory stubs for all variants but NOT the actual DiT weights.
+# DiT weights and LM models must be downloaded separately from their own HF repos.
 RUN --mount=type=secret,id=HF_TOKEN \
-    python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/models/checkpoints', token=token, ignore_patterns=['acestep-v15-base/*', 'acestep-5Hz-lm-1.7B/*'])"
+    python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/models/checkpoints', token=token)"
+
+# Download turbo DiT model weights (8 diffusion steps, ~6x faster than base)
+RUN --mount=type=secret,id=HF_TOKEN \
+    python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/acestep-v15-turbo', local_dir='/models/checkpoints/acestep-v15-turbo', token=token)"
 
 # Download 0.6B LM — fits comfortably in 8GB VRAM alongside the DiT and VAE
 RUN --mount=type=secret,id=HF_TOKEN \
@@ -79,10 +83,6 @@ RUN ln -s /app/checkpoints /usr/local/lib/python3.11/dist-packages/checkpoints
 
 # Copy models from model-downloader stage into /app/checkpoints
 COPY --from=model-downloader /models/checkpoints /app/checkpoints
-
-# Create placeholder for acestep-v15-base to satisfy check_main_model_exists()
-# We use turbo instead, but the startup check looks for all MAIN_MODEL_COMPONENTS
-RUN mkdir -p /app/checkpoints/acestep-v15-base
 
 # Create non-root user (UID 1001) and fix ownership
 RUN groupadd -g 1001 appuser && \
