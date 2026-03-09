@@ -141,39 +141,42 @@ See the [ACE-Step API documentation](https://github.com/ace-step/ACE-Step-1.5/bl
 
 ### Usage with curl
 
-Generate a 60-second track:
+Generate a 30-second instrumental track:
 
 ```bash
 API=http://localhost:8000
 
-# Submit a generation task
+# 1. Submit a generation task
 TASK=$(curl -s -X POST "$API/release_task" \
   -H "Content-Type: application/json" \
   -d '{
-    "caption": "Upbeat indie pop with jangly guitars and energetic vocals",
-    "lyrics": "[Verse 1]\nWalking down the street\nMusic in my feet\n\n[Chorus]\nWe are alive tonight",
-    "duration": 60,
-    "num_songs": 1
+    "caption": "warm acoustic guitar with soft piano, gentle and nostalgic",
+    "lyrics": "",
+    "duration": 30
   }')
 
 echo "$TASK"
-TASK_ID=$(echo "$TASK" | python -c "import sys,json; print(json.load(sys.stdin)['task_id'])")
+TASK_ID=$(echo "$TASK" | jq -r '.data.task_id')
 
-# Poll until done (check every 10s)
+# 2. Poll until done (check every 10s)
+# NOTE: the param is task_id_list, NOT task_ids. Wrong name silently returns empty.
 while true; do
   RESULT=$(curl -s -X POST "$API/query_result" \
     -H "Content-Type: application/json" \
-    -d "{\"task_ids\": [\"$TASK_ID\"]}")
-  echo "$RESULT" | python -m json.tool
-  STATUS=$(echo "$RESULT" | python -c "import sys,json; print(json.load(sys.stdin)['results'][0]['status'])")
-  [ "$STATUS" = "completed" ] && break
-  [ "$STATUS" = "failed" ] && echo "Generation failed" && break
+    -d "{\"task_id_list\": [\"$TASK_ID\"]}")
+
+  STATUS=$(echo "$RESULT" | jq -r '.data[0].status // 0')
+  [ "$STATUS" = "1" ] && echo "Done!" && break
+  [ "$STATUS" = "2" ] && echo "Failed!" && break
+  echo "Processing..."
   sleep 10
 done
 
-# Download the audio
-AUDIO_PATH=$(echo "$RESULT" | python -c "import sys,json; print(json.load(sys.stdin)['results'][0]['audio_paths'][0])")
-curl -o output.wav "$API/v1/audio?path=$AUDIO_PATH"
+# 3. Download the first audio file
+# The result field is a JSON string containing an array of generated files.
+# Audio filenames are NOT the same as the task ID.
+FILE_URL=$(echo "$RESULT" | jq -r '.data[0].result' | jq -r '.[0].file')
+curl -o output.mp3 "$API$FILE_URL"
 ```
 
 ## Environment Variables
