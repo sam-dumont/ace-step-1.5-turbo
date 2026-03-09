@@ -92,12 +92,17 @@ RUN groupadd -g 1001 appuser && \
 COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
-# Create writable directories and fix ownership
-# gradio_outputs: ACE-Step's generation_info.py creates this inside site-packages at import time
-RUN mkdir -p /app/outputs /home/appuser/.cache \
-    /usr/local/lib/python3.11/dist-packages/gradio_outputs && \
-    chown -R 1001:1001 /app/outputs /home/appuser/.cache \
-    /usr/local/lib/python3.11/dist-packages/gradio_outputs
+# Fix ownership for all dirs ACE-Step writes to at runtime:
+#   /app/outputs        — generated audio, logs
+#   /app/checkpoints    — model checkpoints (symlinked into site-packages)
+#   /home/appuser/.cache — PyTorch/HF cache
+#   site-packages/      — ACE-Step creates gradio_outputs/, .cache/, and other
+#                         dirs inside its install path at import time. Rather than
+#                         chasing each one, make the entire dist-packages tree
+#                         writable by appuser.
+RUN mkdir -p /app/outputs /home/appuser/.cache && \
+    chown -R 1001:1001 /app/outputs /app/checkpoints /home/appuser/.cache \
+    /usr/local/lib/python3.11/dist-packages
 
 # PyTorch cache dir: getpass.getuser() needs the user in /etc/passwd (done above),
 # and the cache dir must be writable by UID 1001
