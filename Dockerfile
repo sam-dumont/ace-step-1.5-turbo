@@ -3,12 +3,22 @@
 # =============================================================================
 # This image includes the ACE-Step models (~15GB total)
 # Build with: docker build --secret id=HF_TOKEN,env=HF_TOKEN -t acestep-api:latest .
+#
+# Build args:
+#   LM_MODEL_SIZE - Language model size: "0.6B" (default) or "1.7B"
+#     0.6B: smaller, fits 8GB VRAM GPUs (~13GB image)
+#     1.7B: higher quality, needs more VRAM (~20GB image)
 # =============================================================================
+
+# LM model size: "0.6B" or "1.7B"
+ARG LM_MODEL_SIZE=0.6B
 
 # -----------------------------------------------------------------------------
 # Stage 1: Model Downloader - Download models from HuggingFace
 # -----------------------------------------------------------------------------
 FROM python:3.11-slim AS model-downloader
+
+ARG LM_MODEL_SIZE
 
 WORKDIR /models
 
@@ -19,23 +29,33 @@ RUN pip install --no-cache-dir "huggingface-hub[cli,hf_transfer]"
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 # Download main model package (shared components: VAE, Qwen3-Embedding, text encoder)
-# Exclude base DiT weights and 1.7B LM to keep image small (~13GB instead of ~20GB).
-# The couronne node has limited ephemeral storage, so every GB matters.
+# For 0.6B: exclude base DiT and 1.7B LM (smaller image)
+# For 1.7B: exclude base DiT only (1.7B LM is in the main repo)
 RUN --mount=type=secret,id=HF_TOKEN \
-    python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/models/checkpoints', token=token, ignore_patterns=['acestep-v15-base/*', 'acestep-5Hz-lm-1.7B/*'])"
+    if [ "$LM_MODEL_SIZE" = "1.7B" ]; then \
+      python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/models/checkpoints', token=token, ignore_patterns=['acestep-v15-base/*'])"; \
+    else \
+      python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/Ace-Step1.5', local_dir='/models/checkpoints', token=token, ignore_patterns=['acestep-v15-base/*', 'acestep-5Hz-lm-1.7B/*'])"; \
+    fi
 
 # Download turbo DiT model weights separately (8 diffusion steps, ~6x faster than base)
 RUN --mount=type=secret,id=HF_TOKEN \
     python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/acestep-v15-turbo', local_dir='/models/checkpoints/acestep-v15-turbo', token=token)"
 
-# Download 0.6B LM — fits comfortably in 8GB VRAM alongside the DiT and VAE
+# Download 0.6B LM separately (only for 0.6B builds — it's a separate HF repo)
 RUN --mount=type=secret,id=HF_TOKEN \
-    python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/acestep-5Hz-lm-0.6B', local_dir='/models/checkpoints/acestep-5Hz-lm-0.6B', token=token)"
+    if [ "$LM_MODEL_SIZE" = "0.6B" ]; then \
+      python -c "from huggingface_hub import snapshot_download; token=open('/run/secrets/HF_TOKEN').read().strip(); snapshot_download('ACE-Step/acestep-5Hz-lm-0.6B', local_dir='/models/checkpoints/acestep-5Hz-lm-0.6B', token=token)"; \
+    else \
+      echo "Skipping 0.6B LM download (building $LM_MODEL_SIZE variant)"; \
+    fi
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Install ACE-Step and run from /app
 # -----------------------------------------------------------------------------
 FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04 AS runtime
+
+ARG LM_MODEL_SIZE
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -47,7 +67,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     ACESTEP_DEVICE=cuda \
     # ACE-Step API model paths (full paths to pre-baked models)
     ACESTEP_CONFIG_PATH=/app/checkpoints/acestep-v15-turbo \
-    ACESTEP_LM_MODEL_PATH=/app/checkpoints/acestep-5Hz-lm-0.6B \
+    ACESTEP_LM_MODEL_PATH=/app/checkpoints/acestep-5Hz-lm-${LM_MODEL_SIZE} \
     ACESTEP_LM_BACKEND=pt \
     # Server configuration
     ACESTEP_API_HOST=0.0.0.0 \
@@ -85,7 +105,12 @@ RUN ln -s /app/checkpoints /usr/local/lib/python3.11/dist-packages/checkpoints
 COPY --from=model-downloader /models/checkpoints /app/checkpoints
 
 # Create placeholder dirs for excluded models to satisfy check_main_model_exists()
-RUN mkdir -p /app/checkpoints/acestep-v15-base /app/checkpoints/acestep-5Hz-lm-1.7B
+RUN mkdir -p /app/checkpoints/acestep-v15-base && \
+    if [ "$LM_MODEL_SIZE" = "0.6B" ]; then \
+      mkdir -p /app/checkpoints/acestep-5Hz-lm-1.7B; \
+    else \
+      mkdir -p /app/checkpoints/acestep-5Hz-lm-0.6B; \
+    fi
 
 # Create non-root user (UID 1001) and fix ownership
 RUN groupadd -g 1001 appuser && \

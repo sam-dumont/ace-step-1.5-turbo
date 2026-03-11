@@ -19,6 +19,11 @@ jobs:
       contents: read
       packages: write
 
+    strategy:
+      matrix:
+        lm_model_size: ["0.6B", "1.7B"]
+      fail-fast: false
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,15 +36,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Derive image tag suffix
+        id: tag
+        run: |
+          SIZE="${{ matrix.lm_model_size }}"
+          # 0.6B -> 0.6b, 1.7B -> 1.7b
+          SUFFIX=$(echo "$SIZE" | tr '[:upper:]' '[:lower:]')
+          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          build-args: |
+            LM_MODEL_SIZE=${{ matrix.lm_model_size }}
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-${{ steps.tag.outputs.suffix }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-${{ steps.tag.outputs.suffix }}
           secrets: |
             HF_TOKEN=${{ secrets.HF_TOKEN }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ steps.tag.outputs.suffix }}
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ steps.tag.outputs.suffix }},mode=max
