@@ -21,7 +21,19 @@ jobs:
 
     strategy:
       matrix:
-        lm_model_size: ["0.6B", "1.7B"]
+        include:
+          - lm_model_size: "0.6B"
+            dit_variant: "base"
+            tag_suffix: "0.6b"
+          - lm_model_size: "0.6B"
+            dit_variant: "turbo"
+            tag_suffix: "0.6b-turbo"
+          - lm_model_size: "1.7B"
+            dit_variant: "base"
+            tag_suffix: "1.7b"
+          - lm_model_size: "1.7B"
+            dit_variant: "turbo"
+            tag_suffix: "1.7b-turbo"
       fail-fast: false
 
     steps:
@@ -36,14 +48,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Derive image tag suffix
-        id: tag
-        run: |
-          SIZE="${{ matrix.lm_model_size }}"
-          # 0.6B -> 0.6b, 1.7B -> 1.7b
-          SUFFIX=$(echo "$SIZE" | tr '[:upper:]' '[:lower:]')
-          echo "suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
-
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -51,10 +55,11 @@ jobs:
           push: true
           build-args: |
             LM_MODEL_SIZE=${{ matrix.lm_model_size }}
+            DIT_VARIANT=${{ matrix.dit_variant }}
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-${{ steps.tag.outputs.suffix }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-${{ steps.tag.outputs.suffix }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-${{ matrix.tag_suffix }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-${{ matrix.tag_suffix }}
           secrets: |
             HF_TOKEN=${{ secrets.HF_TOKEN }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ steps.tag.outputs.suffix }}
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ steps.tag.outputs.suffix }},mode=max
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ matrix.tag_suffix }}
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache-${{ matrix.tag_suffix }},mode=max
