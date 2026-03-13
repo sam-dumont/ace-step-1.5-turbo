@@ -58,6 +58,16 @@ RUN --mount=type=secret,id=HF_TOKEN \
       echo "Skipping 0.6B LM download (building $LM_MODEL_SIZE variant)"; \
     fi
 
+# Reorganize models into separate dirs so each becomes its own Docker layer.
+# This makes image pulls resilient: each ~2-5GB layer is independently resumable,
+# instead of one monolithic ~15GB layer that restarts from scratch on failure.
+RUN mkdir -p /models/dit-model /models/lm-model /models/shared-models && \
+    if [ -d /models/checkpoints/acestep-v15-base ]; then mv /models/checkpoints/acestep-v15-base /models/dit-model/; fi && \
+    if [ -d /models/checkpoints/acestep-v15-turbo ]; then mv /models/checkpoints/acestep-v15-turbo /models/dit-model/; fi && \
+    if [ -d /models/checkpoints/acestep-5Hz-lm-1.7B ]; then mv /models/checkpoints/acestep-5Hz-lm-1.7B /models/lm-model/; fi && \
+    if [ -d /models/checkpoints/acestep-5Hz-lm-0.6B ]; then mv /models/checkpoints/acestep-5Hz-lm-0.6B /models/lm-model/; fi && \
+    mv /models/checkpoints/* /models/shared-models/ 2>/dev/null || true
+
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Install ACE-Step and run from /app
 # -----------------------------------------------------------------------------
@@ -110,8 +120,12 @@ RUN git clone https://github.com/ace-step/ACE-Step-1.5.git /app && \
 # ACE-Step uses __file__ to locate checkpoints relative to its install path
 RUN ln -s /app/checkpoints /usr/local/lib/python3.11/dist-packages/checkpoints
 
-# Copy models from model-downloader stage into /app/checkpoints
-COPY --from=model-downloader /models/checkpoints /app/checkpoints
+# Copy models as separate Docker layers for resilient image pulls.
+# Each layer is ~2-5GB instead of one monolithic ~15GB layer, so containerd
+# can resume individual layers on network failure instead of restarting everything.
+COPY --from=model-downloader /models/shared-models/ /app/checkpoints/
+COPY --from=model-downloader /models/dit-model/ /app/checkpoints/
+COPY --from=model-downloader /models/lm-model/ /app/checkpoints/
 
 # Create placeholder dirs for excluded models to satisfy check_main_model_exists()
 RUN if [ "$DIT_VARIANT" != "base" ]; then mkdir -p /app/checkpoints/acestep-v15-base; fi && \
